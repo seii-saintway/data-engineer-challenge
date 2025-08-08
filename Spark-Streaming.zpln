@@ -1,0 +1,125 @@
+{
+  "paragraphs": [
+    {
+      "text": "%sh\nls -lah",
+      "user": "sheng_wei",
+      "dateUpdated": "2020-07-17 12:06:30.598",
+      "config": {
+        "colWidth": 12.0,
+        "fontSize": 9.0,
+        "enabled": true,
+        "results": {},
+        "editorSetting": {
+          "language": "sh",
+          "editOnDblClick": false,
+          "completionKey": "TAB",
+          "completionSupport": false
+        },
+        "editorMode": "ace/mode/sh"
+      },
+      "settings": {
+        "params": {},
+        "forms": {}
+      },
+      "results": {
+        "code": "SUCCESS",
+        "msg": [
+          {
+            "type": "TEXT",
+            "data": "total 84K\ndrwxr-xr-x  5 jupyter-sheng_wei jupyter-sheng_wei 4.0K Jul 17 12:06 .\ndrwxr-x--- 36 jupyter-sheng_wei jupyterhub-users  4.0K Jul 17 11:21 ..\ndrwxr-xr-x  8 jupyter-sheng_wei jupyter-sheng_wei 4.0K Jul 14 17:11 .git\n-rw-r--r--  1 jupyter-sheng_wei jupyter-sheng_wei   80 Jul 10 22:43 .gitignore\ndrwxr-xr-x  2 jupyter-sheng_wei jupyter-sheng_wei 4.0K Jul 16 19:20 .ipynb_checkpoints\n-rw-r--r--  1 jupyter-sheng_wei jupyter-sheng_wei 1.4K Jul 15 23:58 AWS-Elastic-Load-Balancer.ipynb\n-rw-r--r--  1 jupyter-sheng_wei jupyter-sheng_wei  571 Jul 17 00:21 Makefile\n-rw-r--r--  1 jupyter-sheng_wei jupyter-sheng_wei 2.7K Jul 10 11:44 README.md\n-rw-r--r--  1 jupyter-sheng_wei jupyter-sheng_wei 1.3K Jul 15 23:06 Socket-Text-Lines.ipynb\n-rw-r--r--  1 jupyter-sheng_wei jupyter-sheng_wei 1.7K Jul 13 00:09 Socket-Text-Stream.ipynb\n-rw-r--r--  1 jupyter-sheng_wei jupyter-sheng_wei  23K Jul 14 17:03 Spark-Streaming.zpln\ndrwxr-xr-x  3 jupyter-sheng_wei jupyter-sheng_wei 4.0K Jul 17 12:04 data\n-rw-r--r--  1 jupyter-sheng_wei jupyter-sheng_wei  14K Jul 17 12:04 stream.log\n"
+          }
+        ]
+      },
+      "apps": [],
+      "jobName": "paragraph_1594725742673_-505147553",
+      "id": "20200714-202222_1784373052",
+      "dateCreated": "2020-07-14 20:22:22.673",
+      "dateStarted": "2020-07-17 12:06:30.609",
+      "dateFinished": "2020-07-17 12:06:30.649",
+      "status": "FINISHED",
+      "progressUpdateIntervalMs": 500
+    },
+    {
+      "text": "import org.apache.spark.streaming.Seconds\nimport org.apache.spark.streaming.StreamingContext\n\nval ssc \u003d new StreamingContext(sc, Seconds(1))\n\n// Create a DStream that will connect to hostname:port, like localhost:9999\nval entries \u003d ssc.socketTextStream(\"localhost\", 9999)\n\nval combineSessions \u003d (\n  listA: List[(Long, Long, Set[String])],\n  listB: List[(Long, Long, Set[String])]\n) \u003d\u003e {\n  var sessions: List[(Long, Long, Set[String])] \u003d List()\n  var sessionsA \u003d listA\n  var sessionsB \u003d listB\n  while( !sessionsA.isEmpty \u0026\u0026 !sessionsB.isEmpty ) {\n    val sessionA \u003d sessionsA.head\n    val sessionB \u003d sessionsB.head\n    if( sessionA._1 \u003e sessionB._2 ) {\n      sessions \u003d sessions :+ sessionA\n      sessionsA \u003d sessionsA.tail\n    } else if( sessionB._1 \u003e sessionA._2 ) {\n      sessions \u003d sessions :+ sessionB\n      sessionsB \u003d sessionsB.tail\n    } else {\n      val session \u003d (Seq(sessionA._1, sessionB._1).min, Seq(sessionA._2, sessionB._2).max, sessionA._3 ++ sessionB._3)\n      if( sessionA._1 \u003d\u003d session._1 ) {\n        sessionsA \u003d session :: sessionsA.tail\n        sessionsB \u003d sessionsB.tail\n      } else {\n        sessionsB \u003d session :: sessionsB.tail\n        sessionsA \u003d sessionsA.tail\n      }\n    }\n  }\n  if( !sessionsA.isEmpty ) {\n    sessions \u003d sessions ::: sessionsA\n  }\n  if( !sessionsB.isEmpty ) {\n    sessions \u003d sessions ::: sessionsB\n  }\n  sessions\n}\n\nimport java.time.Instant\nimport java.time.temporal.ChronoUnit\nimport scala.NoSuchElementException\n\nval windowTimestamp \u003d 1000 * 1000 * 60 * 15L\nval users \u003d entries.map(\n  entry \u003d\u003e {\n    try {\n      val fields \u003d \"^([^ ]+) [^ ]+ ([^:]+):[^\\\"]+\\\"[^ ]+ ([^? ]+)[? ]\".r.findFirstMatchIn(entry).get\n      val timestamp \u003d ChronoUnit.MICROS.between(Instant.EPOCH, Instant.parse(fields.group(1)))\n      (\n        fields.group(2),\n        List(\n          (timestamp, timestamp + windowTimestamp, Set(fields.group(3).stripSuffix(\"/\")))\n        )\n      )\n    } catch {\n      case ex: NoSuchElementException \u003d\u003e {\n        val dummy: (String, List[(Long, Long, Set[String])]) \u003d (entry.toString(), List())\n        dummy\n      }\n    }\n  }\n)\n\n// users.saveAsTextFiles(\"batch\")\n\nvar userList: List[(String, List[(Long, Long, Set[String])])] \u003d List()\nvar userRDD \u003d sc.parallelize(userList)\nvar count \u003d 0\nusers.foreachRDD(\n  rdd \u003d\u003e {\n    if( rdd.count() \u003e 0 ) {\n      userRDD \u003d userRDD.union(rdd).reduceByKey(combineSessions)\n      userRDD.saveAsTextFile(s\"results\")\n      userRDD.map(\n        user \u003d\u003e (\n          user._1,\n          user._2.length,\n          user._2.map(\n            session \u003d\u003e {\n              (session._1, session._2, session._3.size)\n            }\n          )\n        )\n      ).saveAsTextFile(f\"users-${count}%04d\")\n      val sessionTimeAndCount \u003d userRDD.map(\n        user \u003d\u003e {\n          val sessionTimes \u003d user._2.map(\n            session \u003d\u003e {\n              session._2 - session._1\n            }\n          )\n          (sessionTimes.sum, sessionTimes.length)\n        }\n      ).reduce(\n        (userA, userB) \u003d\u003e {\n          (userA._1 + userB._1, userA._2 + userB._2)\n        }\n      )\n      import java.io.FileWriter\n      val writer \u003d new FileWriter(\"average-session-time.txt\", true)\n      writer.write(f\"${count}%04d: ${sessionTimeAndCount._1.toDouble / sessionTimeAndCount._2 / 1000 / 1000}\\n\")\n      writer.close()\n      count +\u003d 1\n    }\n  }\n)\n\nssc.start()\n// ssc.awaitTermination()",
+      "user": "sheng_wei",
+      "dateUpdated": "2020-07-18 14:56:38.856",
+      "config": {
+        "colWidth": 12.0,
+        "fontSize": 9.0,
+        "enabled": true,
+        "results": {},
+        "editorSetting": {
+          "language": "scala",
+          "editOnDblClick": false,
+          "completionKey": "TAB",
+          "completionSupport": true
+        },
+        "editorMode": "ace/mode/scala"
+      },
+      "settings": {
+        "params": {},
+        "forms": {}
+      },
+      "apps": [],
+      "jobName": "paragraph_1595051785726_-166363585",
+      "id": "20200718-145625_1216647280",
+      "dateCreated": "2020-07-18 14:56:25.726",
+      "status": "READY",
+      "progressUpdateIntervalMs": 500
+    },
+    {
+      "text": "ssc.stop(false, true)",
+      "user": "sheng_wei",
+      "dateUpdated": "2020-07-18 14:57:10.877",
+      "config": {
+        "colWidth": 12.0,
+        "fontSize": 9.0,
+        "enabled": true,
+        "results": {},
+        "editorSetting": {
+          "language": "scala",
+          "editOnDblClick": false,
+          "completionKey": "TAB",
+          "completionSupport": true
+        },
+        "editorMode": "ace/mode/scala"
+      },
+      "settings": {
+        "params": {},
+        "forms": {}
+      },
+      "apps": [],
+      "jobName": "paragraph_1595051398216_-1629112120",
+      "id": "20200718-144958_1324895386",
+      "dateCreated": "2020-07-18 14:49:58.216",
+      "status": "READY",
+      "progressUpdateIntervalMs": 500
+    },
+    {
+      "user": "sheng_wei",
+      "config": {},
+      "settings": {
+        "params": {},
+        "forms": {}
+      },
+      "apps": [],
+      "jobName": "paragraph_1595051830908_853606444",
+      "id": "20200718-145710_629107306",
+      "dateCreated": "2020-07-18 14:57:10.908",
+      "status": "READY",
+      "progressUpdateIntervalMs": 500
+    }
+  ],
+  "name": "PayPay Coding Test",
+  "id": "2FFQEA9NY",
+  "noteParams": {},
+  "noteForms": {},
+  "angularObjects": {
+    "sh:shared_process": [],
+    "spark:shared_process": []
+  },
+  "config": {
+    "isZeppelinNotebookCronEnable": false
+  },
+  "info": {}
+}
